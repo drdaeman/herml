@@ -6,11 +6,12 @@
 
 -define(DOCTYPE_TRANSITIONAL, "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\" \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd\">\n").
 -define(DOCTYPE_STRICT, "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Strict//EN\" \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd\">\n").
--define(DOCTYPE_HTML11, "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.1//EN\" \"http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd\">\n").
+-define(DOCTYPE_XHTML11, "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.1//EN\" \"http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd\">\n").
 -define(DOCTYPE_XML_START, "<?xml version='1.0' encoding='").
 -define(DOCTYPE_XML_END, "' ?>\n").
 -define(DOCTYPE_XML, ?DOCTYPE_XML_START ++ "utf-8" ++ ?DOCTYPE_XML_END).
 -define(DOCTYPE_FRAMESET, "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Frameset//EN\" \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-frameset.dtd\">\n").
+-define(DOCTYPE_HTML5, "<!DOCTYPE html>\n").
 
 render(Template) ->
   render(Template, 0).
@@ -19,68 +20,77 @@ render(Template, Offset) ->
   render(Template, [], Offset).
 
 render(Template, Env, Offset) ->
-  render(Template, Env, [], Offset).
+  render(Template, Env, true, [], Offset).
+
+render(Template, Env, IsHtml, Offset) ->
+  render(Template, Env, IsHtml, [], Offset).
 
 %% Internal functions
 
 % Render simple iteration with LHS pattern matching.
 % [@Foo] <- @Bar
 % [{@Quin, _, _}] <- @Qunx
-render([{_, {iter, Match, {var_ref, List}}, Subtemplate}|T], Env, Accum, Offset) when is_list(Accum) ->
+render([{_, {iter, Match, {var_ref, List}}, Subtemplate}|T], Env, IsHtml, Accum, Offset) when is_list(Accum) ->
   Result = lists:map(fun(Item) ->
-                         unindent(render(Subtemplate, iteration_env(Match, Item, Env), [], Offset)) end,
+                         unindent(render(Subtemplate, iteration_env(Match, Item, Env), IsHtml, [], Offset)) end,
                      lookup_var(List, Env)),
-  render(T, Env, [Result|Accum], Offset);
+  render(T, Env, IsHtml, [Result|Accum], Offset);
 
 % Render simple iteration where RHS is list extracted from a tuple
 % [@Foo] <- @Bar[3]
-render([{_, {iter, Match, {var_ref, TupleWithList, Element}}, Subtemplate}|T], Env, Accum, Offset) when is_list(Accum) ->
+render([{_, {iter, Match, {var_ref, TupleWithList, Element}}, Subtemplate}|T], Env, IsHtml, Accum, Offset) when is_list(Accum) ->
   Result = lists:map(fun(Item) ->
-                         unindent(render(Subtemplate, iteration_env(Match, Item, Env), [], Offset)) end,
+                         unindent(render(Subtemplate, iteration_env(Match, Item, Env), IsHtml, [], Offset)) end,
                      element(Element, proplists:get_value(TupleWithList, Env))),
-  render(T, Env, [Result|Accum], Offset);
+  render(T, Env, IsHtml, [Result|Accum], Offset);
 
 % Render a tag with no children.
 % .class -> <div class="class"></div>
 % .class/ -> <div class="class" />
-render([{Depth, {tag_decl, Attrs}, []}|T], Env, Accum, Offset) when is_list(Accum) ->
-  CloseTag = case detect_terminator(Attrs) of
+render([{Depth, {tag_decl, Attrs}, []}|T], Env, IsHtml, Accum, Offset) when is_list(Accum) ->
+  XhtmlTerminator = detect_terminator(Attrs),
+  {CloseTag, Terminator} = case XhtmlTerminator of
     ">" ->
-      render_inline_end_tag(Attrs);
+      {render_inline_end_tag(Attrs), XhtmlTerminator};
     _ ->
-      "\n"
+      case IsHtml of
+        true ->
+          {"\n", ">"};
+        false ->
+          {"\n", XhtmlTerminator}
+      end
   end,
-  render(T, Env, [render_inline_tag(Depth, Attrs, detect_terminator(Attrs), Env, Offset) ++ CloseTag|Accum], Offset);
+  render(T, Env, IsHtml, [render_inline_tag(Depth, Attrs, Terminator, Env, Offset) ++ CloseTag|Accum], Offset);
 
 % Render a tag with children/contents.
 % #id -> <div id="id">...</div>
-render([{Depth, {tag_decl, Attrs}, Children}|T], Env, Accum, Offset) when is_list(Accum) ->
+render([{Depth, {tag_decl, Attrs}, Children}|T], Env, IsHtml, Accum, Offset) when is_list(Accum) ->
   B1 = render_tag(Depth, Attrs, ">", Env, Offset),
-  B2 = B1 ++ render(Children, Env, Offset),
-  render(T, Env, [B2 ++ render_end_tag(Depth, Attrs, Offset)|Accum], Offset);
+  B2 = B1 ++ render(Children, Env, IsHtml, Offset),
+  render(T, Env, IsHtml, [B2 ++ render_end_tag(Depth, Attrs, Offset)|Accum], Offset);
 
 % Render a simple variable reference.
 % @Foo
-render([{Depth, {var_ref, VarName}, []}|T], Env, Accum, Offset) when is_list(Accum) ->
-  render(T, Env, [create_whitespace(Depth + Offset) ++ lookup_var(VarName, Env) ++ "\n"|Accum], Offset);
+render([{Depth, {var_ref, VarName}, []}|T], Env, IsHtml, Accum, Offset) when is_list(Accum) ->
+  render(T, Env, IsHtml, [create_whitespace(Depth + Offset) ++ lookup_var(VarName, Env) ++ "\n"|Accum], Offset);
 
 % Render a variable reference with tuple element extraction.
 % @Bar[3]
-render([{Depth, {var_ref, VarName, Element}, []}|T], Env, Accum, Offset) when is_list(Accum) ->
-  render(T, Env, [create_whitespace(Depth + Offset) ++ format(element(Element, proplists:get_value(VarName, Env)), Env) ++ "\n"|Accum], Offset);
+render([{Depth, {var_ref, VarName, Element}, []}|T], Env, IsHtml, Accum, Offset) when is_list(Accum) ->
+  render(T, Env, IsHtml, [create_whitespace(Depth + Offset) ++ format(element(Element, proplists:get_value(VarName, Env)), Env) ++ "\n"|Accum], Offset);
 
 % TODO: CULL THIS LATER - NO TESTS AFFECTED
 % variables should not have nested contents
-% render([{_, {var_ref, VarName}, Children}|T], Env, Accum, Offset) ->
-%   render(T, Env, [lookup_var(VarName, Env) ++ render(Children, Env, Offset) | Accum], Offset);
+% render([{_, {var_ref, VarName}, Children}|T], Env, IsHtml, Accum, Offset) ->
+%   render(T, Env, IsHtml, [lookup_var(VarName, Env) ++ render(Children, Env, IsHtml, Offset) | Accum], Offset);
 
 % Render a function call.
-render([{Depth, {fun_call, Module, Fun, Args}, Children}|T], Env, Accum, Offset) ->
+render([{Depth, {fun_call, Module, Fun, Args}, Children}|T], Env, IsHtml, Accum, Offset) ->
   Result = create_whitespace(Depth + Offset) ++ invoke_fun(Module, Fun, Args, Env) ++ "\n",
-  render(T, Env, [Result ++ render(Children, Env, Offset) | Accum], Offset);
+  render(T, Env, IsHtml, [Result ++ render(Children, Env, IsHtml, Offset) | Accum], Offset);
 
 % Render a function call that receives the rendering environment.
-render([{Depth, {fun_call_env, Module, Fun, Args}, Children}|T], Env, Accum, Offset) ->
+render([{Depth, {fun_call_env, Module, Fun, Args}, Children}|T], Env, IsHtml, Accum, Offset) ->
   {R, NewEnv} = invoke_fun_env(Module, Fun, Args, Env, Depth + Offset),
   WS = create_whitespace(Depth + Offset),
   Result = case string:str(R, WS) of
@@ -89,44 +99,48 @@ render([{Depth, {fun_call_env, Module, Fun, Args}, Children}|T], Env, Accum, Off
              _ ->
                R ++ "\n"
            end,
-  render(T, Env, [Result ++ render(Children, NewEnv, Offset) | Accum], Offset);
+  render(T, Env, IsHtml, [Result ++ render(Children, NewEnv, IsHtml, Offset) | Accum], Offset);
 
 % Render the XHTML Transitional doctype
-render([{_, {doctype, "Transitional", _}, []}|T], Env, Accum, Offset) ->
-  render(T, Env, [?DOCTYPE_TRANSITIONAL|Accum], Offset);
+render([{_, {doctype, "Transitional", _}, []}|T], Env, _IsHtml, Accum, Offset) ->
+  render(T, Env, false, [?DOCTYPE_TRANSITIONAL|Accum], Offset);
 
 % Render the XHTML Strict doctype
-render([{_, {doctype, "Strict", _}, []}|T], Env, Accum, Offset) ->
-  render(T, Env, [?DOCTYPE_STRICT|Accum], Offset);
+render([{_, {doctype, "Strict", _}, []}|T], Env, _IsHtml, Accum, Offset) ->
+  render(T, Env, false, [?DOCTYPE_STRICT|Accum], Offset);
 
 % Render XHTML 1.1 doctype
-render([{_, {doctype, "1.1", _}, []}|T], Env, Accum, Offset) ->
-  render(T, Env, [?DOCTYPE_HTML11|Accum], Offset);
+render([{_, {doctype, "1.1", _}, []}|T], Env, _IsHtml, Accum, Offset) ->
+  render(T, Env, false, [?DOCTYPE_XHTML11|Accum], Offset);
 
 % Render an XML processing instruction with encoding
-render([{_, {doctype, "XML", Encoding}, []}|T], Env, Accum, Offset) when is_list(Encoding),
+render([{_, {doctype, "XML", Encoding}, []}|T], Env, _IsHtml, Accum, Offset) when is_list(Encoding),
                                                                          Encoding /= [] ->
-  render(T, Env, lists:reverse(?DOCTYPE_XML_START ++ Encoding ++ ?DOCTYPE_XML_END) ++ Accum, Offset);
+  render(T, Env, false, lists:reverse(?DOCTYPE_XML_START ++ Encoding ++ ?DOCTYPE_XML_END) ++ Accum, Offset);
 
 % Render an XML processing instruction with the default encoding
-render([{_, {doctype, "XML", []}, []}|T], Env, Accum, Offset) ->
-  render(T, Env, [?DOCTYPE_XML|Accum], Offset);
+render([{_, {doctype, "XML", []}, []}|T], Env, _IsHtml, Accum, Offset) ->
+  render(T, Env, false, [?DOCTYPE_XML|Accum], Offset);
 
 % Render the Frameset doctype
-render([{_, {doctype, "Frameset", _}, []}|T], Env, Accum, Offset) ->
-  render(T, Env, [?DOCTYPE_FRAMESET|Accum], Offset);
+render([{_, {doctype, "Frameset", _}, []}|T], Env, _IsHtml, Accum, Offset) ->
+  render(T, Env, false, [?DOCTYPE_FRAMESET|Accum], Offset);
+
+% Render HTML 5 doctype
+render([{_, {doctype, "5", _}, []}|T], Env, _IsHtml, Accum, Offset) ->
+  render(T, Env, true, [?DOCTYPE_HTML5|Accum], Offset);
 
 % Render arbitrary text.
-render([{Depth, Text, []}|T], Env, Accum, Offset) ->
-  render(T, Env, [render_text(Text, Depth, Offset) ++ "\n"|Accum], Offset);
+render([{Depth, Text, []}|T], Env, IsHtml, Accum, Offset) ->
+  render(T, Env, IsHtml, [render_text(Text, Depth, Offset) ++ "\n"|Accum], Offset);
 
 % TODO: CULL THIS LATER - NO TESTS AFFECTED
 % text should not have nested contents
-% render([{Depth, Text, Children}|T], Env, Accum, Offset) ->
-%   render(T, Env, [render_text(Text, Depth, Offset) ++ render(Children, Env, Offset)|Accum], Offset);
+% render([{Depth, Text, Children}|T], Env, IsHtml, Accum, Offset) ->
+%   render(T, Env, IsHtml, [render_text(Text, Depth, Offset) ++ render(Children, Env, IsHtml, Offset)|Accum], Offset);
 
 % End of buffer/nesting, reverse the result
-render([], _Env, Accum, _Offset) ->
+render([], _Env, _IsHtml, Accum, _Offset) ->
   lists:reverse(Accum).
 
 % Indent and render the text
