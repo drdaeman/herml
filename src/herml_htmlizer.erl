@@ -2,7 +2,7 @@
 
 -export([render/1, render/2, render/3]).
 
--define(RESERVED_TAG_ATTRS, [tag_name, singleton]).
+-define(RESERVED_TAG_ATTRS, [tag_name, singleton, tag_content]).
 
 -define(DOCTYPE_TRANSITIONAL, "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\" \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd\">\n").
 -define(DOCTYPE_STRICT, "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Strict//EN\" \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd\">\n").
@@ -60,7 +60,16 @@ render([{Depth, {tag_decl, Attrs}, []}|T], Env, IsHtml, Accum, Offset) when is_l
           {"\n", XhtmlTerminator}
       end
   end,
-  render(T, Env, IsHtml, [render_inline_tag(Depth, Attrs, Terminator, Env, Offset) ++ CloseTag|Accum], Offset);
+  TextContent = case proplists:get_value(tag_content, Attrs) of
+    undefined -> "";
+    {var_ref, VarName} -> lookup_var(list_to_atom(VarName), Env);
+    {fun_call, Module, Fun, Args} -> invoke_fun(Module, Fun, Args, Env);
+    {fun_call_env, Module, Fun, Args} ->
+      {R, _} = invoke_fun_env(Module, Fun, Args, Env, Depth + Offset),
+      R;
+    Other -> Other
+  end,
+  render(T, Env, IsHtml, [render_inline_tag(Depth, Attrs, Terminator, Env, Offset) ++ TextContent ++ CloseTag|Accum], Offset);
 
 % Render a tag with children/contents.
 % #id -> <div id="id">...</div>

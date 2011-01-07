@@ -94,6 +94,7 @@ param_value -> number : unwrap_param('$1').
 %% singletons or containers
 tag_decl -> tag_stem : {tag_decl, '$1'}.
 tag_decl -> tag_stem slash : {tag_decl, [{singleton, true}|'$1']}.
+tag_decl -> tag_stem space attr_value : {tag_decl, [{tag_content, '$3'}|'$1']}.
 
 %% tag stems (names, ids, classes, attrs)
 tag_stem -> tag_start name : [unwrap_label_attr(tag_name, '$2')].
