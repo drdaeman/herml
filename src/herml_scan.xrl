@@ -14,6 +14,9 @@ _           :  {token, {underscore, TokenLine, TokenChars}}.
 '(\\\^.|\\.|[^'])*' :
   S = lists:sublist(TokenChars, 2, TokenLen - 2),
   {token, {string, TokenLine, S}}.
+"(\\\^.|\\.|[^"])*" :
+  S = lists:sublist(TokenChars, 2, TokenLen - 2),
+  {token, {string, TokenLine, S}}.
 {IDENT}+    :  {token, {chr, TokenLine, TokenChars}}.
 {           :  {token, {lcurly, TokenLine, TokenChars}}.
 }           :  {token, {rcurly, TokenLine, TokenChars}}.
@@ -22,6 +25,7 @@ _           :  {token, {underscore, TokenLine, TokenChars}}.
 \@          :  {token, {at, TokenLine, TokenChars}}.
 \,          :  {token, {comma, TokenLine, TokenChars}}.
 '           :  {token, {quote, TokenLine, TokenChars}}.
+"           :  {token, {dblquote, TokenLine, TokenChars}}.
 \:          :  {token, {colon, TokenLine, TokenChars}}.
 \/          :  {token, {slash, TokenLine, TokenChars}}.
 !           :  {token, {bang, TokenLine, TokenChars}}.
@@ -31,5 +35,6 @@ _           :  {token, {underscore, TokenLine, TokenChars}}.
 <           :  {token, {lt, TokenLine, TokenChars}}.
 >           :  {token, {gt, TokenLine, TokenChars}}.
 \s+         :  {token, {space, TokenLine, TokenChars}}.
+.           :  {token, {other, TokenLine, TokenChars}}.
 
 Erlang code.
